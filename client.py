@@ -17,17 +17,19 @@ class EditorServerConnection:
 		self.problem = None
 		self.current_state_id = ""
 		self.caret_offset = 0
+		self.random_seed = 1
 	
 	async def connect(self):
 		self.ws = await websockets.connect(self.uri, additional_headers=HEADERS, subprotocols=["tools.refinery.language.web.xtext.v1"])
 
-	async def on_message(self, message):
+	async def on_message(self, message, type: str = ''):
 		dict_of_message: dict = json.loads(message)
 		print(dict_of_message)
 		# Setting the expected id
 		if 'response' in dict_of_message.keys():
 			response = dict_of_message["response"]
-			self.current_state_id = response["stateId"]
+			if 'stateId' in response.keys():
+				self.current_state_id = response["stateId"]
 	
 	def create_init_update(self):
 		'''Init of the problem. Sent as an update'''
@@ -106,16 +108,32 @@ class EditorServerConnection:
 		whole_json_request = json.dumps(whole_json_request)
 		return whole_json_request
 
+	def create_generation(self):
+		whole_json_request: dict = dict()
+		request_dict: dict = dict()
+
+		id_of_msg = idgen()
+		request_dict['resource'] = self.resource
+		request_dict['serviceType'] = "modelGeneration"
+		request_dict['requiredStateId'] = self.current_state_id
+		request_dict['start'] = True
+		request_dict['randomSeed'] = self.random_seed
+		self.random_seed += 1
+
+		whole_json_request['id'] = id_of_msg
+		whole_json_request['request'] = request_dict
+		whole_json_request = json.dumps(whole_json_request)
+		return whole_json_request
+
 	async def send_init_messages(self, request):
 		await self.connect()
 		await self.ws.send(request)
 		# Waiting for the initial connection messages
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
+		INIT_RESPONSES = 4
+		for i in range(INIT_RESPONSES):
+			await self.on_message(await self.ws.recv())
 		self.initialized = True
-		print('Update fullText responses received!... (4)')
+		print('Update fullText responses received!... (' + str(INIT_RESPONSES) + ')')
 		print('')
 
 	async def send_occurences_message(self, request):
@@ -126,19 +144,26 @@ class EditorServerConnection:
 	
 	async def send_assist_message(self, request):
 		await self.ws.send(request)
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		print('Assist (add "asdf") responses received...! (3)')
+		ASSIST_RESPONSES = 3
+		for i in range(ASSIST_RESPONSES):
+			await self.on_message(await self.ws.recv())
+		print('Assist (add "asdf") responses received...! (' + str(ASSIST_RESPONSES) + ')')
 		print('')
 
 	async def send_update_message(self, request):
 		await self.ws.send(request)
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		await self.on_message(await self.ws.recv())
-		print('Update (remove "asdf") responses received...! (3)')
+		UPDATE_RESPONSES = 4
+		for i in range(UPDATE_RESPONSES):
+			await self.on_message(await self.ws.recv())
+		print('Update (remove "asdf") responses received...! (' + str(UPDATE_RESPONSES) + ')')
+		print('')
+
+	async def send_generation_message(self, request):
+		await self.ws.send(request)
+		GENERATION_RESPONSES = 9 
+		for i in range(GENERATION_RESPONSES):
+			await self.on_message(await self.ws.recv())
+		print('Model Generation responses received...! (' + str(GENERATION_RESPONSES) + ')')
 		print('')
 
 	async def send_to_server(self, type: str):
@@ -169,12 +194,18 @@ class EditorServerConnection:
 			await self.send_update_message(request)
 			await self.send_to_server('occurrences')
 
+		elif str.lower(type) == 'generation':
+			request = self.create_generation()
+			await self.send_generation_message(request)
+
 	async def run_test(self):
 		await self.send_to_server('init')
 		time.sleep(1)
 		await self.send_to_server('assist')
 		time.sleep(1)
 		await self.send_to_server('update')
+		await self.send_to_server('generation')
+		await self.ws.close()
 
      
  
