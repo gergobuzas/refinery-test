@@ -1,8 +1,11 @@
+import statistics
 import websockets
 import asyncio
 import json
 import time
 from nanoid import generate as idgen
+from multiprocessing import Process
+import concurrent.futures
 
 HEADERS = {
     "Sec-WebSocket-Protocol": "tools.refinery.language.web.xtext.v1"
@@ -198,19 +201,78 @@ class EditorServerConnection:
 			request = self.create_generation()
 			await self.send_generation_message(request)
 
-	async def run_test(self):
+	async def run_test_real_sim(self):
 		await self.send_to_server('init')
-		time.sleep(1)
-		await self.send_to_server('assist')
-		time.sleep(1)
-		await self.send_to_server('update')
+		# Adding text
+		#time.sleep(1)
+		#await self.send_to_server('assist')
+		#time.sleep(1)
+		# Removing text
+		#await self.send_to_server('update')
+		# Sending out the generation
+		start_time = time.time()
 		await self.send_to_server('generation')
 		await self.ws.close()
+		end_time = time.time()
+		elapsed_time = end_time - start_time
+		print(elapsed_time)
+		elapsed_times.append(elapsed_time)
+		return elapsed_time
 
-     
- 
+async def run_test():
+	conn = EditorServerConnection("ws://refinery-language-web-ALB-607081577.eu-north-1.elb.amazonaws.com:80/xtext-service")
+	return await conn.run_test_real_sim()
+
+async def run_tests(num):
+    # Run run_test concurrently and await results
+    tasks = [run_test() for _ in range(num)]
+    results = await asyncio.gather(*tasks)
+    return results
+
+def export_to_json():
+	json_to_export = {
+		key: {
+			"responseTimes": elapsed_dict[key],
+			"median": medians[key]
+		}
+		for key in elapsed_dict
+	} 
+	# Write the data to a JSON file
+	with open("results/" + str(time.time()) + "benchmark_results.json", "w") as json_file:
+		json.dump(json_to_export, json_file, indent=4)
+
+	print("Data successfully exported to benchmark_results.json")
+	print(elapsed_dict)
+	print(medians)
+
+elapsed_times = list()
+medians = dict()
+elapsed_dict = dict()
 if __name__ == "__main__":
-	conn = EditorServerConnection("ws://localhost:1312/xtext-service")
-	asyncio.run(conn.run_test())
+	#conn = EditorServerConnection("ws://localhost:1312/xtext-service")
+	#asyncio.run(conn.run_test_real_sim())
+	SEND_NUM_OF_REQUESTS = 3
+	increments = 25
+	start_time = time.time()
+	for i in range(SEND_NUM_OF_REQUESTS):
+		results = asyncio.run(run_tests(i + 1))
 
+		print()
+		print(results)
+		print()
+		results = sorted(results)
+		print()
+		print(results)
+		print()
+
+		median = statistics.median(results)
+		print("Median: " + str(median))
+		print()
+		medians[i] = median
+		elapsed_dict[i] = results
+		# Print results
+		for j, result in enumerate(results, 1):
+			print(f"Result from coroutine {j}: {result}")
+
+	export_to_json()
 	
